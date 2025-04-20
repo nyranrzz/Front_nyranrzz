@@ -6,6 +6,9 @@ import LoginScreen from './src/screens/LoginScreen';
 import MarketPanel from './src/screens/MarketPanel';
 import BazaPanel from './src/screens/BazaPanel';
 import InfoPanel from './src/screens/InfoPanel';
+import AdminPanel from './src/screens/AdminPanel';
+import ReportsPanel from './src/screens/ReportsPanel';
+import AddProductPanel from './src/screens/AddProductPanel';
 import * as Storage from './src/utils/storage';
 import { colors } from './src/constants/colors';
 
@@ -51,6 +54,9 @@ export default function App() {
         <Stack.Screen name="MarketPanel" component={MarketPanel} />
         <Stack.Screen name="BazaPanel" component={BazaPanel} />
         <Stack.Screen name="InfoPanel" component={InfoPanel} />
+        <Stack.Screen name="AdminPanel" component={AdminPanel} />
+        <Stack.Screen name="ReportsPanel" component={ReportsPanel} />
+        <Stack.Screen name="AddProductPanel" component={AddProductPanel} />
       </Stack.Navigator>
     </NavigationContainer>
   );

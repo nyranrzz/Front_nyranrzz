@@ -33,6 +33,7 @@ const BazaPanel = ({ route, navigation }) => {
     fetchMarkets();
     fetchProducts();
     fetchPendingOrders();
+    fetchSavedPrices(); // New: Fetch saved prices
   }, []);
 
   const fetchMarkets = async () => {
@@ -72,6 +73,42 @@ const BazaPanel = ({ route, navigation }) => {
     }
   };
 
+  // New function to fetch saved prices
+  const fetchSavedPrices = async () => {
+    try {
+      setIsLoading(true);
+      const data = await bazaApi.getPrices();
+
+      if (data && data.prices && data.prices.length > 0) {
+        // Update product prices from saved data, but preserve total values
+        setProducts(prevProducts => {
+          const updatedProducts = [...prevProducts];
+          
+          for (const product of updatedProducts) {
+            const savedPrice = data.prices.find(p => p.product_id === product.id);
+            
+            if (savedPrice) {
+              product.price = savedPrice.price.toString();
+              // Toplam sütununu değiştirmiyoruz, pazar siparişlerinden gelen değeri koruyoruz
+              // product.total = savedPrice.total.toString();
+              
+              // Toplam değerini sipariş verilerinden alıyoruz
+              const totalQuantity = parseFloat(getTotalOrderQuantity(product.id)) || 0;
+              const price = parseFloat(savedPrice.price) || 0;
+              product.grandTotal = (totalQuantity * price).toFixed(2);
+            }
+          }
+          
+          return updatedProducts;
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching saved prices:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const fetchPendingOrders = async () => {
     try {
       setIsLoading(true);
@@ -107,7 +144,11 @@ const BazaPanel = ({ route, navigation }) => {
         });
       });
       
+      // Sadece veri çekme işlemi yapıyoruz, herhangi bir statü değişikliği yapmıyoruz
       setMarketOrders(marketOrdersMap);
+      
+      // Fiyat verilerini de tekrar yükleyelim
+      await fetchSavedPrices();
     } catch (error) {
       console.error('Error fetching pending orders:', error);
       Alert.alert(
@@ -144,7 +185,7 @@ const BazaPanel = ({ route, navigation }) => {
     // Confirm before deleting all data
     Alert.alert(
       'Təsdiq',
-      'Bütün sifarişlər silinəcək. Davam etmək istəyirsiniz?',
+      'Bütün sifarişlər və qiymətlər silinəcək. Davam etmək istəyirsiniz?',
       [
         {
           text: 'Xeyr',
@@ -160,7 +201,10 @@ const BazaPanel = ({ route, navigation }) => {
               // Call API to clear all data in database
               await bazaApi.clearAllOrders();
               
-              // Clear local state
+              // Also clear the prices
+              await bazaApi.clearPrices();
+              
+              // Clear local state for everything
               setProducts(prevProducts =>
                 prevProducts.map(product => ({
                   ...product,
@@ -176,12 +220,12 @@ const BazaPanel = ({ route, navigation }) => {
               setPendingOrders([]);
               
               // Show success message
-              Alert.alert('Uğurlu', 'Bütün sifarişlər bazadan silindi');
+              Alert.alert('Uğurlu', 'Bütün sifarişlər və qiymətlər silindi');
             } catch (error) {
-              console.error('Error clearing orders:', error);
+              console.error('Error clearing data:', error);
               Alert.alert(
                 'Xəta',
-                'Sifarişləri silmək mümkün olmadı. Zəhmət olmasa yenidən cəhd edin.'
+                'Məlumatları silmək mümkün olmadı. Zəhmət olmasa yenidən cəhd edin.'
               );
             } finally {
               setIsLoading(false);
@@ -193,11 +237,10 @@ const BazaPanel = ({ route, navigation }) => {
   };
 
   const handleReset = () => {
+    // Only reset the price column, keep market numbers the same
     setProducts(prevProducts =>
       prevProducts.map(product => ({
         ...product,
-        marketQuantity: '0',
-        total: '0',
         price: '',
         grandTotal: '0'
       }))
@@ -236,54 +279,38 @@ const BazaPanel = ({ route, navigation }) => {
 
   const handleConfirm = async () => {
     try {
-      // Find pending orders for the selected market
-      const marketPendingOrders = pendingOrders.filter(
-        order => order.market_id === selectedMarket.id
-      );
+      setIsLoading(true);
       
-      if (marketPendingOrders.length === 0) {
-        Alert.alert('Xəta', 'Seçilmiş market üçün gözləyən sifariş tapılmadı');
-      return;
-    }
-    
-      // For each pending order, approve it
-      for (const order of marketPendingOrders) {
-        // Get order details
-        const orderDetails = await bazaApi.getOrderById(order.id);
-        
-        // Format items with price from our products state
-        const formattedItems = orderDetails.items.map(item => {
-          const product = products.find(p => p.id === item.product_id);
-          const price = parseFloat(product?.price) || 0;
-          
-          return {
-        id: item.id,
-            receivedQuantity: parseFloat(item.requested_quantity) || 0,
-            price: price
-          };
-        });
-        
-        // Skip if no items with prices
-        if (formattedItems.every(item => item.price <= 0)) {
-          continue;
-        }
-        
-        // Approve order
-        await bazaApi.approveOrder(order.id, formattedItems);
-      }
+      // Format the products for saving
+      const formattedItems = products
+        .filter(p => parseFloat(p.price) > 0) // Only save products with prices
+        .map(product => ({
+          productId: product.id,
+          price: product.price,
+          total: getTotalOrderQuantity(product.id),
+          grandTotal: (parseFloat(getTotalOrderQuantity(product.id)) * parseFloat(product.price)).toFixed(2)
+        }));
       
-      Alert.alert('Uğurlu', 'Sifariş təsdiq edildi', [
+      // Save prices to database
+      await bazaApi.savePrices(formattedItems, calculateGrandTotal());
+      
+      // Artık siparişleri onaylamıyoruz, sadece fiyatları kaydediyoruz
+      // Bu sayede pazar numarası sütunundaki değerler korunacak
+      
+      Alert.alert('Uğurlu', 'Qiymətlər yadda saxlanıldı', [
         { text: 'Tamam', onPress: () => {
-          // Refresh pending orders
-          fetchPendingOrders();
+          // Sadece fiyat verilerini yeniliyoruz, siparişleri değil
+          fetchSavedPrices();
         }}
       ]);
     } catch (error) {
-      console.error('Error approving order:', error);
+      console.error('Error confirming data:', error);
       Alert.alert(
         'Xəta',
-        'Sifarişi təsdiq etmək mümkün olmadı. Zəhmət olmasa yenidən cəhd edin.'
+        'Məlumatları yadda saxlamaq mümkün olmadı. Zəhmət olmasa yenidən cəhd edin.'
       );
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -332,7 +359,10 @@ const BazaPanel = ({ route, navigation }) => {
             <Text style={styles.date}>{currentDate}</Text>
           </View>
           <View style={styles.headerButtons}>
-            <TouchableOpacity onPress={() => fetchPendingOrders()} style={styles.iconButton}>
+            <TouchableOpacity onPress={() => {
+              // Sadece verileri yenile, herhangi bir statü değişikliği yapma
+              fetchPendingOrders();
+            }} style={styles.iconButton}>
               <Icon name="refresh" type="material" color="white" size={22} />
             </TouchableOpacity>
             <TouchableOpacity onPress={handleClearData} style={styles.iconButton}>
@@ -441,7 +471,7 @@ const BazaPanel = ({ route, navigation }) => {
           <Text style={[styles.columnHeader, styles.priceColumn]}>Qiymət</Text>
           <Text style={[styles.columnHeader, styles.grandTotalColumn]}>Cəm</Text>
         </View>
-            </View>
+      </View>
 
       {/* Table Content */}
       <ScrollView style={styles.tableContainer}>

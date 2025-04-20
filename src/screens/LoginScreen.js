@@ -30,9 +30,7 @@ const LoginScreen = ({ navigation }) => {
           // Navigate based on user role
           switch (userData.role) {
             case 'admin':
-              // Admin paneli şimdilik kaldırıldı
-              Alert.alert('Bildirim', 'Admin paneli şu anda kullanılabilir değil.');
-              setIsInitializing(false);
+              navigation.navigate('AdminPanel', { user: userData });
               break;
             case 'baza':
               navigation.navigate('BazaPanel', { user: userData });
@@ -79,24 +77,26 @@ const LoginScreen = ({ navigation }) => {
       console.log('API URL:', `${API_URL}/auth/login`);
 
       // Show toast for debug purposes in non-production builds
-      if (__DEV__) {
-        showToast(`Bağlanılıyor: ${API_URL}/auth/login`);
-      }
+      // if (__DEV__) {
+      //   showToast(`Bağlanılıyor: ${API_URL}/auth/login`);
+      // }
 
       const data = await authApi.login(email, password);
       console.log('Login successful, navigating to:', data.user.role);
       
+      // Login başarılıysa kendi token ve kullanıcı bilgilerini saklar
+      // authApi.login içinde zaten setToken ve setUserInfo çağrılıyor
+      
       // Navigate based on user role
       switch (data.user.role) {
         case 'admin':
-          // Admin paneli şimdilik kaldırıldı
-          Alert.alert('Bildirim', 'Admin paneli şu anda geliştirme aşamasındadır ve kullanılabilir değil.');
+          navigation.navigate('AdminPanel', { user: data.user });  // Token zaten API tarafında saklandı
           break;
         case 'baza':
-          navigation.navigate('BazaPanel', { user: { ...data.user, token: data.token } });
+          navigation.navigate('BazaPanel', { user: data.user });  // Token zaten API tarafında saklandı
           break;
         case 'market':
-          navigation.navigate('MarketPanel', { user: { ...data.user, token: data.token } });
+          navigation.navigate('MarketPanel', { user: data.user });  // Token zaten API tarafında saklandı
           break;
         default:
           console.log('Unknown user role:', data.user.role);

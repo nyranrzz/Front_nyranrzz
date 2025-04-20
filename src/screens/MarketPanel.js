@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Button, Icon } from '@rneui/themed';
 import { marketPanelStyles as styles } from '../styles/screens/marketPanel.styles';
-import { productApi, orderApi } from '../services/api';
+import { productApi, orderApi, marketTotalApi } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authApi } from '../services/api';
 
@@ -45,22 +45,27 @@ const MarketPanel = ({ route, navigation }) => {
         if (draftOrders && draftOrders.length > 0) {
           console.log('Loaded draft orders from API:', draftOrders.length);
           
-          // Create a map of productId -> quantity for easier access
-          const draftMap = {};
-          draftOrders.forEach(draft => {
-            draftMap[draft.product_id] = draft.quantity;
-          });
-          
           // Apply drafts to products
           const updatedOrders = data.map(product => {
-            const quantity = draftMap[product.id] || '';
-            return {
-              ...product,
-              quantity: quantity.toString(),
-              receivedQuantity: '',
-              price: '',
-              total: '0'
-            };
+            const draft = draftOrders.find(d => d.product_id === product.id);
+            
+            if (draft) {
+              return {
+                ...product,
+                quantity: draft.quantity.toString(),
+                receivedQuantity: draft.received_quantity ? draft.received_quantity.toString() : '',
+                price: draft.price ? draft.price.toString() : '',
+                total: draft.total ? draft.total.toString() : '0'
+              };
+            } else {
+              return {
+                ...product,
+                quantity: '',
+                receivedQuantity: '',
+                price: '',
+                total: '0'
+              };
+            }
           });
           
           setOrders(updatedOrders);
@@ -149,6 +154,20 @@ const MarketPanel = ({ route, navigation }) => {
     
     // Format to 2 decimal places
     orderList[index].total = total.toFixed(2);
+    
+    // No more real-time updates - we'll only update on save button press
+  };
+  
+  // Update total received in real-time - now will only be called by the save button
+  const updateTotalReceivedInRealTime = async (totalAmount) => {
+    try {
+      console.log(`Updating total received: ${totalAmount} for market ${user.id}`);
+      const response = await marketTotalApi.saveTotalReceived(user.id, totalAmount);
+      console.log('Update total received response:', response);
+    } catch (error) {
+      console.error('Error updating total received:', error);
+      // Fail silently - don't show errors to the user
+    }
   };
 
   const calculateGrandTotal = () => {
@@ -293,18 +312,17 @@ const MarketPanel = ({ route, navigation }) => {
 
   const saveDraftOrdersToAPI = async () => {
     try {
-      // Only save items with quantity > 0
-      const draftItems = orders
-        .filter(order => parseFloat(order.quantity) > 0)
-        .map(order => ({
-          productId: order.id,
-          quantity: parseFloat(order.quantity)
-        }));
+      // Save all items - include quantity, receivedQuantity, price, and total
+      const draftItems = orders.map(order => ({
+        productId: order.id,
+        quantity: parseFloat(order.quantity) || 0,
+        receivedQuantity: parseFloat(order.receivedQuantity) || 0,
+        price: parseFloat(order.price) || 0,
+        total: parseFloat(order.total) || 0
+      }));
       
-      if (draftItems.length > 0) {
-        await orderApi.saveDraftOrders(user.id, draftItems);
-        console.log(`Saved ${draftItems.length} draft items to API`);
-      }
+      await orderApi.saveDraftOrders(user.id, draftItems);
+      console.log(`Saved ${draftItems.length} draft items to API`);
       
       return true;
     } catch (error) {
@@ -314,24 +332,21 @@ const MarketPanel = ({ route, navigation }) => {
   };
 
   const handleSave = async () => {
-    // Check if there are orders with prices and received quantities
-    const completedOrders = orders.filter(order => 
-      parseFloat(order.receivedQuantity) > 0 && parseFloat(order.price) > 0
-    );
-    
-    if (completedOrders.length === 0) {
-      Alert.alert('Xəta', 'Ən azı bir məhsulun alış qiymətini və miqdarını daxil edin');
-      return;
-    }
-    
     try {
       setIsSaving(true);
       
-      // Save draft orders to API
+      // Calculate the current grand total
+      const grandTotal = calculateGrandTotal();
+      
+      // Save all draft orders to API with the full details
       const success = await saveDraftOrdersToAPI();
       
       // Also save to AsyncStorage for backward compatibility
       await saveOrdersToStorage();
+      
+      // Save the grand total to the market total API
+      await marketTotalApi.saveTotalReceived(user.id, grandTotal);
+      console.log(`Saved total received amount: ${grandTotal} for market ID: ${user.id}`);
       
       setIsSaving(false);
       
@@ -411,21 +426,21 @@ const MarketPanel = ({ route, navigation }) => {
                 value={order.quantity}
                 onChangeText={(text) => handleQuantityChange(text, index)}
                 keyboardType="decimal-pad"
-                placeholder="0.00"
+                placeholder="0"
               />
               <TextInput
                 style={styles.inputCell}
                 value={order.receivedQuantity}
                 onChangeText={(text) => handleReceivedQuantityChange(text, index)}
                 keyboardType="decimal-pad"
-                placeholder="0.00"
+                placeholder="0"
               />
               <TextInput
                 style={styles.inputCell}
                 value={order.price}
                 onChangeText={(text) => handlePriceChange(text, index)}
                 keyboardType="decimal-pad"
-                placeholder="0.00"
+                placeholder="0"
               />
               <Text style={styles.totalCell}>{order.total}</Text>
             </View>
